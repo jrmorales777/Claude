@@ -29,13 +29,15 @@ jobs:
           if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
           swift ios/tools/generate_icon.swift
           (cd ios && xcodegen generate)
+          if ! command -v pod >/dev/null; then brew install cocoapods; fi
+          (cd ios && pod install)
           mkdir -p "$RUNNER_TEMP/keys"
           echo "$API_KEY" | base64 --decode > "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8"
           chmod 600 "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8"
       - name: Build Apple signed archive using automatic cloud provisioning
         run: |
           set -euo pipefail
-          xcodebuild -project ios/WorldVoiceTranslator.xcodeproj \
+          xcodebuild -workspace ios/WorldVoiceTranslator.xcworkspace \
             -scheme WorldVoiceTranslator -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/WorldVoiceTranslator.xcarchive" \
