@@ -5,6 +5,7 @@ import Combine
 
 final class SpeechInput: NSObject, ObservableObject {
     @Published var isRecording = false
+    @Published var transcript = ""
     @Published var message = ""
     private let engine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
@@ -15,6 +16,7 @@ final class SpeechInput: NSObject, ObservableObject {
     func start(language: String, completion: @escaping (String) -> Void) {
         stop()
         delivered = false
+        transcript = ""
         SFSpeechRecognizer.requestAuthorization { [weak self] permission in
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -63,7 +65,8 @@ final class SpeechInput: NSObject, ObservableObject {
                 DispatchQueue.main.async {
                     guard let self = self else { return }
                     if let result = result {
-                        self.message = "Recognizing: " + result.bestTranscription.formattedString
+                        self.transcript = result.bestTranscription.formattedString
+                        self.message = "Recognizing: " + self.transcript
                         if result.isFinal && !self.delivered {
                             self.delivered = true
                             let text = result.bestTranscription.formattedString
