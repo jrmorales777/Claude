@@ -1,0 +1,45 @@
+name: Build iPhone Sideload IPA
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/build-ios-sideload.yml'
+permissions:
+  contents: read
+jobs:
+  unsigned-ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare Xcode project and icon
+        run: |
+          xcodebuild -version
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+          swift ios/tools/generate_icon.swift
+          (cd ios && xcodegen generate)
+      - name: Compile iPhone hardware app
+        run: |
+          set -euo pipefail
+          xcodebuild -project ios/WorldVoiceTranslator.xcodeproj \
+            -scheme WorldVoiceTranslator -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath ios/.devicebuild \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' build
+      - name: Package unsigned IPA for AltStore or SideStore
+        run: |
+          set -euo pipefail
+          mkdir -p Payload
+          cp -R ios/.devicebuild/Build/Products/Release-iphoneos/WorldVoiceTranslator.app Payload/
+          rm -rf Payload/WorldVoiceTranslator.app/_CodeSignature
+          rm -f Payload/WorldVoiceTranslator.app/embedded.mobileprovision
+          /usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' Payload/WorldVoiceTranslator.app/Info.plist
+          file Payload/WorldVoiceTranslator.app/WorldVoiceTranslator
+          zip -qry WorldVoiceTranslator-iPhone-Unsigned-Sideload.ipa Payload
+          unzip -t WorldVoiceTranslator-iPhone-Unsigned-Sideload.ipa | tail -2
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: WorldVoiceTranslator-iPhone-Sideload-UNSIGNED
+          path: WorldVoiceTranslator-iPhone-Unsigned-Sideload.ipa
+          if-no-files-found: error
