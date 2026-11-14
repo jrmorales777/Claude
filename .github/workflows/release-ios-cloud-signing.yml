@@ -1,0 +1,81 @@
+name: iPhone TestFlight Cloud Signing
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: macos-15
+    env:
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+      ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+      API_KEY: ${{ secrets.APPSTORE_API_KEY_P8_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate required Apple credentials
+        shell: bash
+        run: |
+          for v in TEAM_ID KEY_ID ISSUER_ID API_KEY; do
+            if [ -z "$(printenv "$v")" ]; then
+              echo "::error::Required Apple developer signing secret $v is not configured"
+              exit 1
+            fi
+          done
+      - name: Prepare Apple authentication and Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+          swift ios/tools/generate_icon.swift
+          (cd ios && xcodegen generate)
+          mkdir -p "$RUNNER_TEMP/keys"
+          echo "$API_KEY" | base64 --decode > "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8"
+          chmod 600 "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8"
+      - name: Build Apple signed archive using automatic cloud provisioning
+        run: |
+          set -euo pipefail
+          xcodebuild -project ios/WorldVoiceTranslator.xcodeproj \
+            -scheme WorldVoiceTranslator -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/WorldVoiceTranslator.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8" \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            archive
+      - name: Export signed IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,plistlib
+          options = {"method":"app-store-connect", "destination":"export",
+                     "teamID":os.environ["TEAM_ID"], "signingStyle":"automatic"}
+          with open("/tmp/WorldVoiceExportOptions.plist","wb") as f:
+              plistlib.dump(options,f)
+          PY
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/WorldVoiceTranslator.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist /tmp/WorldVoiceExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8" \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID"
+          cp "$RUNNER_TEMP/export/"*.ipa WorldVoiceTranslator-iPhone-Signed.ipa
+      - name: Preserve real signed iPhone installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: WorldVoiceTranslator-Signed-iPhone-IPA
+          path: WorldVoiceTranslator-iPhone-Signed.ipa
+          if-no-files-found: error
+      - name: Publish to Apple TestFlight
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          cp "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8" "$HOME/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8"
+          xcrun altool --upload-app -t ios -f WorldVoiceTranslator-iPhone-Signed.ipa \
+            --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
