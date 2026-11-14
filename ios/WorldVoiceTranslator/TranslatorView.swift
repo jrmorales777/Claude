@@ -111,15 +111,12 @@ struct TranslatorView: View {
                     .fill(.white)
                     .frame(width: 70, height: 70)
                     .shadow(color: Palette.blue.opacity(0.12), radius: 12, y: 4)
-                Image(systemName: "globe.americas.fill")
-                    .font(.system(size: 43, weight: .medium))
-                    .foregroundStyle(LinearGradient(colors: [Palette.blue, Palette.sky], startPoint: .top, endPoint: .bottom))
-                Image(systemName: "waveform")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(5)
-                    .background(Palette.blue, in: Capsule())
-                    .offset(y: 13)
+                Image("BrandIcon")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 66, height: 66)
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .accessibilityLabel("World Voice Translator globe and voice logo")
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text("WORLD VOICE")
@@ -213,8 +210,14 @@ struct TranslatorView: View {
 
             Button {
                 if microphone.isRecording {
+                    let heard = microphone.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
                     microphone.stop()
-                    status = "Stopped listening."
+                    if !heard.isEmpty {
+                        sourceText = heard
+                        translate()
+                    } else {
+                        status = "No words recognized. Try again or type your message."
+                    }
                 } else {
                     voice.stop()
                     microphone.start(language: from) { words in
@@ -381,13 +384,35 @@ struct TranslatorView: View {
             return
         }
         translating = true
-        textToTranslate = original
         translatedText = ""
-        status = "Preparing translation. Download permission may be requested."
-        if configuration == nil {
-            configuration = TranslationSession.Configuration(source: Locale.Language(identifier: from), target: Locale.Language(identifier: to))
-        } else {
-            configuration?.invalidate()
+        status = "Checking whether Apple supports this language pair…"
+        let selectedSource = from
+        let selectedTarget = to
+        Task { @MainActor in
+            let availability = LanguageAvailability()
+            let support = await availability.status(
+                from: Locale.Language(identifier: selectedSource),
+                to: Locale.Language(identifier: selectedTarget)
+            )
+            guard selectedSource == from && selectedTarget == to else {
+                translating = false
+                return
+            }
+            if support == .unsupported {
+                translating = false
+                status = "Apple translation doesn't support \(fromName) → \(toName) on this device. Choose another language pair."
+                return
+            }
+            textToTranslate = original
+            status = "Preparing translation. iOS may ask permission to download a language model."
+            if configuration == nil {
+                configuration = TranslationSession.Configuration(
+                    source: Locale.Language(identifier: from),
+                    target: Locale.Language(identifier: to)
+                )
+            } else {
+                configuration?.invalidate()
+            }
         }
     }
 }
