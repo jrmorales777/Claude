@@ -2,6 +2,6 @@
 <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 <uses-permission android:name="android.permission.INTERNET"/>
 <queries><intent><action android:name="android.speech.RecognitionService"/></intent><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>
-<application android:label="World Voice Translator" android:allowBackup="false" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false">
+<application android:label="World Voice Translator" android:allowBackup="false" android:theme="@style/WorldVoiceTheme" android:icon="@drawable/ic_worldvoice" android:roundIcon="@drawable/ic_worldvoice" android:usesCleartextTraffic="false">
 <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
 </application></manifest>
