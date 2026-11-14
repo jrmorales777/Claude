@@ -1,10 +1,6 @@
 name: Signed iPhone TestFlight Release
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'ios/**'
-      - '.github/workflows/release-ios-testflight.yml'
 permissions:
   contents: read
 jobs:
