@@ -33,7 +33,6 @@ private let choices: [LanguageOption] = [
     ("th", "Thai"), ("tr", "Turkish"), ("uk", "Ukrainian"), ("ur", "Urdu"),
     ("vi", "Vietnamese"), ("cy", "Welsh")
 ].map { LanguageOption(code: $0.0, label: $0.1) }
-  .filter { TranslateLanguage.fromLanguageTag($0.code == "zh-Hans" || $0.code == "zh-Hant" ? "zh" : $0.code) != nil }
 
 struct TranslatorView: View {
     @StateObject private var microphone = SpeechInput()
@@ -364,12 +363,8 @@ struct TranslatorView: View {
         }
         let inputCode = from == "zh-Hans" || from == "zh-Hant" ? "zh" : from
         let outputCode = to == "zh-Hans" || to == "zh-Hant" ? "zh" : to
-        guard let sourceLanguage = TranslateLanguage.fromLanguageTag(inputCode),
-              let targetLanguage = TranslateLanguage.fromLanguageTag(outputCode) else {
-            status = "Translation is not supported for this selected language."
-            translating = false
-            return
-        }
+        let sourceLanguage = TranslateLanguage(rawValue: inputCode)
+        let targetLanguage = TranslateLanguage(rawValue: outputCode)
         let sourceLabel = fromName
         let targetLabel = toName
         let sourceCode = from
