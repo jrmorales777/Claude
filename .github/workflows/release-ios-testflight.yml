@@ -27,7 +27,9 @@ jobs:
         run: |
           if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
           swift ios/tools/generate_icon.swift
-          cd ios && xcodegen generate
+          (cd ios && xcodegen generate)
+          if ! command -v pod >/dev/null; then brew install cocoapods; fi
+          (cd ios && pod install)
       - name: Import Apple distribution certificates
         run: |
           set -euo pipefail
@@ -44,7 +46,7 @@ jobs:
       - name: Archive and export signed IPA
         run: |
           set -euo pipefail
-          xcodebuild -project ios/WorldVoiceTranslator.xcodeproj -scheme WorldVoiceTranslator \
+          xcodebuild -workspace ios/WorldVoiceTranslator.xcworkspace -scheme WorldVoiceTranslator \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/WorldVoiceTranslator.xcarchive" DEVELOPMENT_TEAM="$TEAM_ID" \
             CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Apple Distribution" \
