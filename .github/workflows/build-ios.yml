@@ -32,6 +32,31 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath ios/.build \
             CODE_SIGNING_ALLOWED=NO build | tee ios/build.log
+      - name: Launch in iPhone Simulator
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available
+          DEVICE_ID=$(python3 - <<'PY'
+          import json,subprocess
+          data=json.loads(subprocess.check_output(["xcrun","simctl","list","-j","devices","available"]))
+          print(next(d["udid"] for devices in data["devices"].values() for d in devices if d["name"].startswith("iPhone ") and d["state"]=="Shutdown"))
+          PY
+          )
+          echo "Booting iPhone simulator: $DEVICE_ID"
+          xcrun simctl boot "$DEVICE_ID"
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+          xcrun simctl install "$DEVICE_ID" ios/.build/Build/Products/Debug-iphonesimulator/WorldVoiceTranslator.app
+          xcrun simctl launch "$DEVICE_ID" com.jrmorales.worldvoicetranslator
+          sleep 4
+          xcrun simctl io "$DEVICE_ID" screenshot "$GITHUB_WORKSPACE/iPhone-Simulator-Launch.png"
+          echo "Native iOS app successfully launched in simulator."
+      - name: Upload simulator screenshot
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iPhone-launch-verification
+          path: iPhone-Simulator-Launch.png
+          if-no-files-found: error
       - name: Package simulator build
         if: success()
         run: |
