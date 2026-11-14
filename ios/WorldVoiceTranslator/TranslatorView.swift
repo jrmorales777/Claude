@@ -1,5 +1,5 @@
 import SwiftUI
-import Translation
+import MLKitTranslate
 import Speech
 import AVFoundation
 
@@ -33,6 +33,7 @@ private let choices: [LanguageOption] = [
     ("th", "Thai"), ("tr", "Turkish"), ("uk", "Ukrainian"), ("ur", "Urdu"),
     ("vi", "Vietnamese"), ("cy", "Welsh")
 ].map { LanguageOption(code: $0.0, label: $0.1) }
+  .filter { TranslateLanguage.fromLanguageTag($0.code == "zh-Hans" || $0.code == "zh-Hant" ? "zh" : $0.code) != nil }
 
 struct TranslatorView: View {
     @StateObject private var microphone = SpeechInput()
@@ -44,8 +45,8 @@ struct TranslatorView: View {
     @State private var status = "Ready. Choose a language and tap the microphone."
     @State private var automaticSpeech = true
     @State private var translating = false
-    @State private var configuration: TranslationSession.Configuration?
-    @State private var textToTranslate = ""
+    @State private var activeTranslator: MLKitTranslate.Translator?
+    @State private var requestToken = 0
     @State private var history: [String] = UserDefaults.standard.stringArray(forKey: "worldvoice_history") ?? []
     private var fromName: String { choices.first { $0.code == from }?.label ?? from }
     private var toName: String { choices.first { $0.code == to }?.label ?? to }
@@ -63,7 +64,7 @@ struct TranslatorView: View {
                     translationPanel
                     optionsPanel
                     historyPanel
-                    Text("WORLD VOICE  •  iOS EDITION")
+                    Text("WORLD VOICE  •  iOS PREMIUM  •  Translation by Google")
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundStyle(Palette.muted)
                         .frame(maxWidth: .infinity)
@@ -71,35 +72,6 @@ struct TranslatorView: View {
                 }
                 .padding(.horizontal, 19)
                 .padding(.top, 15)
-            }
-        }
-        .translationTask(configuration) { session in
-            let original = textToTranslate
-            await MainActor.run {
-                translating = true
-                status = "Translating… the phone may need to download language models."
-            }
-            do {
-                let response = try await session.translate(original)
-                await MainActor.run {
-                    translatedText = response.targetText
-                    translating = false
-                    status = "Translated from \(fromName) to \(toName)."
-                    let item = "\(fromName) → \(toName)\n\(original)\n\(response.targetText)"
-                    history.insert(item, at: 0)
-                    history = Array(history.prefix(20))
-                    UserDefaults.standard.set(history, forKey: "worldvoice_history")
-                    if automaticSpeech {
-                        if !voice.speak(response.targetText, language: to) {
-                            status = "Translation ready. No installed speaking voice is available for \(toName)."
-                        }
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    translating = false
-                    status = "Translation unavailable: \(error.localizedDescription). This language pair may not be supported by the Apple translation engine."
-                }
             }
         }
     }
@@ -166,7 +138,7 @@ struct TranslatorView: View {
                 .accessibilityLabel("Switch languages")
                 picker("To", selected: $to)
             }
-            Text("Voice recognition and spoken playback depend on iPhone language availability. Not every listed language pair supports Apple translation.")
+            Text("Voice recognition and spoken playback depend on iPhone language availability. Speech recognition and voice playback vary by iPhone language services.")
                 .font(.system(size: 11))
                 .foregroundStyle(Palette.muted)
         }
@@ -362,59 +334,82 @@ struct TranslatorView: View {
             .foregroundStyle(Palette.muted)
     }
     private func swap() {
+        requestToken += 1
+        activeTranslator = nil
+        translating = false
         let previous = from
         from = to
         to = previous
-        configuration = nil
         voice.stop()
         microphone.stop()
+        translatedText = ""
         status = "Languages switched."
     }
+
     private func translate() {
         let original = sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !original.isEmpty else {
             status = "Speak or type a message before tapping Translate."
             return
         }
+        requestToken += 1
+        let request = requestToken
         voice.stop()
         if from == to {
+            translating = false
             translatedText = original
             status = "Both languages are the same."
             if automaticSpeech { _ = voice.speak(original, language: to) }
             return
         }
+        let inputCode = from == "zh-Hans" || from == "zh-Hant" ? "zh" : from
+        let outputCode = to == "zh-Hans" || to == "zh-Hant" ? "zh" : to
+        guard let sourceLanguage = TranslateLanguage.fromLanguageTag(inputCode),
+              let targetLanguage = TranslateLanguage.fromLanguageTag(outputCode) else {
+            status = "Translation is not supported for this selected language."
+            translating = false
+            return
+        }
+        let sourceLabel = fromName
+        let targetLabel = toName
+        let sourceCode = from
+        let targetCode = to
         translating = true
         translatedText = ""
-        status = "Checking whether Apple supports this language pair…"
-        let selectedSource = from
-        let selectedTarget = to
-        Task { @MainActor in
-            let availability = LanguageAvailability()
-            let support = await availability.status(
-                from: Locale.Language(identifier: selectedSource),
-                to: Locale.Language(identifier: selectedTarget)
-            )
-            guard selectedSource == from && selectedTarget == to else {
-                translating = false
+        status = "Preparing on-device language models. First use may download language data."
+        let options = TranslatorOptions(sourceLanguage: sourceLanguage, targetLanguage: targetLanguage)
+        let client = MLKitTranslate.Translator.translator(options: options)
+        activeTranslator = client
+        client.downloadModelIfNeeded { error in
+            guard request == self.requestToken, self.from == sourceCode,
+                  self.to == targetCode else { return }
+            if let error = error {
+                self.translating = false
+                self.status = "Language model download failed: \(error.localizedDescription). Check your internet connection."
                 return
             }
-            if support == .unsupported {
-                translating = false
-                status = "Apple translation doesn't support \(fromName) → \(toName) on this device. Choose another language pair."
-                return
-            }
-            textToTranslate = original
-            status = "Preparing translation. iOS may ask permission to download a language model."
-            if configuration == nil {
-                configuration = TranslationSession.Configuration(
-                    source: Locale.Language(identifier: from),
-                    target: Locale.Language(identifier: to)
-                )
-            } else {
-                configuration?.invalidate()
+            self.status = "Translating your words…"
+            client.translate(original) { result, error in
+                guard request == self.requestToken, self.from == sourceCode,
+                      self.to == targetCode else { return }
+                self.translating = false
+                guard let result = result, error == nil else {
+                    self.status = "Translation failed: \(error?.localizedDescription ?? "Unknown error"). Please try again."
+                    return
+                }
+                self.translatedText = result
+                self.status = "Translated \(sourceLabel) → \(targetLabel)."
+                let item = "\(sourceLabel) → \(targetLabel)\n\(original)\n\(result)"
+                self.history.insert(item, at: 0)
+                self.history = Array(self.history.prefix(20))
+                UserDefaults.standard.set(self.history, forKey: "worldvoice_history")
+                if self.automaticSpeech && !self.voice.speak(result, language: targetCode) {
+                    self.status = "Translation ready. No installed spoken voice for \(targetLabel)."
+                }
             }
         }
     }
+
 }
 private struct PrimaryStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
