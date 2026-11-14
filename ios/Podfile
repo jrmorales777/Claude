@@ -1,0 +1,6 @@
+platform :ios, '18.0'
+use_frameworks! :linkage => :static
+
+target 'WorldVoiceTranslator' do
+  pod 'GoogleMLKit/Translate', '8.0.0'
+end
