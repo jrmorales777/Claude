@@ -1,0 +1,53 @@
+name: Build iPhone App
+on:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/build-ios.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  simulator:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode environment
+        run: |
+          xcodebuild -version
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+      - name: Generate premium launcher icon
+        run: swift ios/tools/generate_icon.swift
+      - name: Generate Xcode project
+        run: |
+          cd ios
+          xcodegen generate
+      - name: Compile iPhone Simulator app
+        run: |
+          set -o pipefail
+          xcodebuild -project ios/WorldVoiceTranslator.xcodeproj \
+            -scheme WorldVoiceTranslator \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath ios/.build \
+            CODE_SIGNING_ALLOWED=NO build | tee ios/build.log
+      - name: Package simulator build
+        if: success()
+        run: |
+          cd ios/.build/Build/Products/Debug-iphonesimulator
+          zip -qry "$GITHUB_WORKSPACE/WorldVoiceTranslator-Simulator.zip" WorldVoiceTranslator.app
+      - name: Upload simulator build
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: WorldVoiceTranslator-iOS-Simulator-NOT-installable-on-iPhone
+          path: WorldVoiceTranslator-Simulator.zip
+          if-no-files-found: error
+      - name: Upload diagnostic log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iOS-build-diagnostics
+          path: ios/build.log
+          if-no-files-found: ignore

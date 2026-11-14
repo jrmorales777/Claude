@@ -1,0 +1,29 @@
+name: WorldVoiceTranslator
+options:
+  bundleIdPrefix: com.jrmorales
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+targets:
+  WorldVoiceTranslator:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: WorldVoiceTranslator
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jrmorales.worldvoicetranslator
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: "World Voice Translator"
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "World Voice Translator uses speech recognition to translate your words."
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "World Voice Translator uses the microphone when you tap Speak."
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        CODE_SIGN_STYLE: Automatic
+    scheme:
+      testTargets: []
