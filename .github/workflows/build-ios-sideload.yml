@@ -18,10 +18,12 @@ jobs:
           if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
           swift ios/tools/generate_icon.swift
           (cd ios && xcodegen generate)
+          if ! command -v pod >/dev/null; then brew install cocoapods; fi
+          (cd ios && pod install)
       - name: Compile iPhone hardware app
         run: |
           set -euo pipefail
-          xcodebuild -project ios/WorldVoiceTranslator.xcodeproj \
+          xcodebuild -workspace ios/WorldVoiceTranslator.xcworkspace \
             -scheme WorldVoiceTranslator -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath ios/.devicebuild \
