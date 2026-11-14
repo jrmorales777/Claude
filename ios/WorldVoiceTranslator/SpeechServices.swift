@@ -12,6 +12,7 @@ final class SpeechInput: NSObject, ObservableObject {
     private var task: SFSpeechRecognitionTask?
     private var recognizer: SFSpeechRecognizer?
     private var delivered = false
+    private var tapInstalled = false
 
     func start(language: String, completion: @escaping (String) -> Void) {
         stop()
@@ -52,11 +53,12 @@ final class SpeechInput: NSObject, ObservableObject {
             try AVAudioSession.sharedInstance().setCategory(.record, mode: .measurement, options: .duckOthers)
             try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
             let input = engine.inputNode
-            input.removeTap(onBus: 0)
+            if tapInstalled { input.removeTap(onBus: 0); tapInstalled = false }
             let format = input.outputFormat(forBus: 0)
             input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
                 request.append(buffer)
             }
+            tapInstalled = true
             engine.prepare()
             try engine.start()
             isRecording = true
@@ -88,7 +90,10 @@ final class SpeechInput: NSObject, ObservableObject {
 
     func stop() {
         if engine.isRunning { engine.stop() }
-        engine.inputNode.removeTap(onBus: 0)
+        if tapInstalled {
+            engine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+        }
         request?.endAudio()
         task?.cancel()
         task = nil
