@@ -69,7 +69,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 intArrayOf(Color.rgb(241,248,255), Color.WHITE, Color.rgb(239,247,255)))
         }
         val scroll = ScrollView(this)
-        scroll.fillViewport = true
+        scroll.isFillViewport = true
         scroll.addView(root)
         setContentView(scroll)
         root.addView(label("🌐 World Voice Translator", 27f).apply {
