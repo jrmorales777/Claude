@@ -35,6 +35,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var translator: Translator? = null
     private var readerReady = false
     private var pendingMicrophone = false
+    private val speechRequest = 1001
     private var revision = 0
     private var autoPlay = true
     private val supported = TranslateLanguage.getAllLanguages().sortedBy { display(it) }
@@ -76,6 +77,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.rgb(14,48,96))
         })
         root.addView(label("Speak naturally. Connect across languages.", 14f))
+        root.addView(label("Tap Speak and talk. The first translation downloads its language model using internet.", 13f))
         root.addView(label("LANGUAGES", 13f).apply { typeface = Typeface.DEFAULT_BOLD })
         val langRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         sourceSelect = Spinner(this)
@@ -140,46 +142,74 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         translator?.close(); translator = null
         message.text = "Languages swapped."
     }
+
     private fun listen() {
         if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             pendingMicrophone = true
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 42)
             return
         }
+        val language = Locale.forLanguageTag(from()).toLanguageTag()
+        val voiceIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak in ${display(from())}")
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        }
+        try {
+            message.text = "Opening voice input for ${display(from())}..."
+            startActivityForResult(voiceIntent, speechRequest)
+            return
+        } catch (e: Exception) {
+            message.text = "Trying another voice input method..."
+        }
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            message.text = "Speech recognition is unavailable on this phone. You can still type."
+            message.text = "Voice recognition is not installed. Enable Google Speech Services in your phone settings, or type instead."
+            Toast.makeText(this, message.text, Toast.LENGTH_LONG).show()
             return
         }
         recognizer?.destroy()
         recognizer = SpeechRecognizer.createSpeechRecognizer(this)
         recognizer?.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) { message.text = "Listening in ${display(from())}…" }
-            override fun onBeginningOfSpeech() { message.text = "Listening…" }
+            override fun onReadyForSpeech(params: Bundle?) { message.text = "Listening in ${display(from())}..." }
+            override fun onBeginningOfSpeech() { message.text = "Listening..." }
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() { message.text = "Processing speech…" }
-            override fun onError(error: Int) { message.text = "Speech recognition error $error. Check speech service and selected language." }
+            override fun onEndOfSpeech() { message.text = "Processing speech..." }
+            override fun onError(error: Int) { message.text = "Speech error $error. Verify microphone access and the selected speech language." }
             override fun onResults(results: Bundle?) {
                 val heard = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                if (heard.isNullOrBlank()) { message.text = "No speech was recognized."; return }
-                input.setText(heard); translate()
+                if (heard.isNullOrBlank()) { message.text = "No speech recognized. Try again."; return }
+                input.setText(heard)
+                translate()
             }
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
-        val language = Locale.forLanguageTag(from()).toLanguageTag()
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-        }
-        try { recognizer?.startListening(intent) }
+        try { recognizer?.startListening(voiceIntent) }
         catch (e: Exception) { message.text = "Microphone unavailable: ${e.localizedMessage}" }
+    }
+    @Deprecated("Android speech activity callback")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != speechRequest) return
+        if (resultCode != RESULT_OK) {
+            message.text = "Voice input cancelled or speech not recognized. Try again or type."
+            return
+        }
+        val heard = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (heard.isNullOrBlank()) {
+            message.text = "No words recognized. Try again in a quiet place."
+        } else {
+            input.setText(heard)
+            message.text = "Speech recognized. Translating..."
+            translate()
+        }
     }
     private fun translate() {
         val phrase = input.text.toString().trim()
-        if (phrase.isEmpty()) { message.text = "Speak or type a message first."; return }
+        if (phrase.isEmpty()) { message.text = "Speak or type words first, then press Translate."; Toast.makeText(this, "Speak or type a message first", Toast.LENGTH_LONG).show(); return }
         val source = from(); val destination = to()
         val token = ++revision
         translator?.close(); translator = null
@@ -191,7 +221,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val client = Translation.getClient(TranslatorOptions.Builder()
             .setSourceLanguage(source).setTargetLanguage(destination).build())
         translator = client
-        message.text = "Preparing ${display(source)} → ${display(destination)}..."
+        message.text = "Preparing ${display(source)} → ${display(destination)}. First use can take time to download the language model; internet must be on."
+        output.text = "Preparing translation..."
         client.downloadModelIfNeeded(DownloadConditions.Builder().build())
             .addOnSuccessListener {
                 if (token != revision || translator !== client) return@addOnSuccessListener
@@ -203,10 +234,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     addHistory("${display(source)} → ${display(destination)}\n$phrase\n$result")
                     if (autoPlay) play()
                 }.addOnFailureListener { error ->
-                    if (token == revision) message.text = "Translation error: ${error.localizedMessage}"
+                    if (token == revision) { output.text = "Translation failed"; message.text = "Translation failed: ${error.localizedMessage}. Check your internet connection and try again."; Toast.makeText(this, message.text, Toast.LENGTH_LONG).show() }
                 }
             }.addOnFailureListener { error ->
-                if (token == revision) message.text = "Model download failed: ${error.localizedMessage}"
+                if (token == revision) { output.text = "Language model unavailable"; message.text = "Language download failed: ${error.localizedMessage}. Check Wi-Fi or mobile data and retry."; Toast.makeText(this, message.text, Toast.LENGTH_LONG).show() }
             }
     }
     private fun addHistory(entry: String) {
@@ -225,7 +256,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val locale = Locale.forLanguageTag(to())
         val support = engine.isLanguageAvailable(locale)
         if (support == TextToSpeech.LANG_NOT_SUPPORTED || support == TextToSpeech.LANG_MISSING_DATA) {
-            message.text = "This phone does not have a spoken voice for ${display(to())}. The text translation is available."
+            message.text = "Spoken voice for ${display(to())} is not installed. Add it in Android text-to-speech settings. The translation text is still available."
             return
         }
         engine.language = locale; engine.setSpeechRate(.95f)
