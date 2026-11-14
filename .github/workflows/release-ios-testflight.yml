@@ -1,0 +1,70 @@
+name: Signed iPhone TestFlight Release
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: macos-15
+    env:
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+      CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      PROFILE: ${{ secrets.APPLE_PROVISION_PROFILE_BASE64 }}
+      PROFILE_NAME: ${{ secrets.APPLE_PROFILE_NAME }}
+      KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+      ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+      API_KEY: ${{ secrets.APPSTORE_API_KEY_P8_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Apple signing is configured
+        shell: bash
+        run: |
+          for v in TEAM_ID CERTIFICATE CERT_PASSWORD PROFILE PROFILE_NAME KEY_ID ISSUER_ID API_KEY; do
+            if [ -z "$(printenv "$v")" ]; then echo "::error::Apple signing secret $v is not configured"; exit 1; fi
+          done
+      - name: Generate Xcode project and premium icon
+        run: |
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+          swift ios/tools/generate_icon.swift
+          cd ios && xcodegen generate
+      - name: Import Apple distribution certificates
+        run: |
+          set -euo pipefail
+          echo "$CERTIFICATE" | base64 --decode > /tmp/apple-cert.p12
+          echo "$PROFILE" | base64 --decode > /tmp/apple-profile.mobileprovision
+          security create-keychain -p "ci-temp" worldvoice.keychain
+          security unlock-keychain -p "ci-temp" worldvoice.keychain
+          security import /tmp/apple-cert.p12 -k worldvoice.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -d user -s worldvoice.keychain login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: -s -k "ci-temp" worldvoice.keychain
+          UUID=$(security cms -D -i /tmp/apple-profile.mobileprovision | /usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin)
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp /tmp/apple-profile.mobileprovision "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
+      - name: Archive and export signed IPA
+        run: |
+          set -euo pipefail
+          xcodebuild -project ios/WorldVoiceTranslator.xcodeproj -scheme WorldVoiceTranslator \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/WorldVoiceTranslator.xcarchive" DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" archive
+          python3 - <<'PY'
+          import plistlib,os
+          obj={"method":"app-store-connect","teamID":os.environ["TEAM_ID"],"signingStyle":"manual",
+               "provisioningProfiles":{"com.jrmorales.worldvoicetranslator":os.environ["PROFILE_NAME"]}}
+          with open("/tmp/export.plist","wb") as f: plistlib.dump(obj,f)
+          PY
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/WorldVoiceTranslator.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" -exportOptionsPlist /tmp/export.plist
+          cp "$RUNNER_TEMP/export/"*.ipa WorldVoiceTranslator-iPhone-Signed.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WorldVoiceTranslator-iPhone-SIGNED-IPA
+          path: WorldVoiceTranslator-iPhone-Signed.ipa
+          if-no-files-found: error
+      - name: Upload to Apple TestFlight
+        run: |
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          echo "$API_KEY" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8"
+          xcrun altool --upload-app -t ios -f WorldVoiceTranslator-iPhone-Signed.ipa --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
