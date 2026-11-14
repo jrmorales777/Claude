@@ -136,14 +136,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         window.navigationBarColor = Color.WHITE
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
 
-        val background = GradientDrawable(
+        val pageBackground = GradientDrawable(
             GradientDrawable.Orientation.TL_BR,
             intArrayOf(Color.rgb(245, 250, 255), Color.WHITE, Color.rgb(239, 247, 255))
         )
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(px(19), px(22), px(19), px(34))
-            setBackground(background)
+            setBackground(pageBackground)
         }
         val scroll = ScrollView(this).apply {
             isFillViewport = true
